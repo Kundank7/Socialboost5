@@ -8,6 +8,11 @@ const sql = neon(process.env.DATABASE_URL!)
 const db = drizzle(sql)
 
 // User functions
+export async function getUserById(id: number) {
+  const result = await sql`SELECT * FROM users WHERE id = ${id} LIMIT 1`
+  return result.length > 0 ? result[0] : null
+}
+
 export async function getUserByEmail(email: string) {
   const result = await sql`SELECT * FROM users WHERE email = ${email} LIMIT 1`
   return result.length > 0 ? result[0] : null
@@ -35,11 +40,56 @@ export async function createUser(userData: { uid: string; email: string; name: s
   return user
 }
 
+export async function updateUser(id: number, userData: { name?: string; email?: string; photo_url?: string }) {
+  const { name, email, photo_url } = userData
+
+  // Build dynamic query
+  const updates = []
+  const values = []
+
+  if (name !== undefined) {
+    updates.push("name = $1")
+    values.push(name)
+  }
+
+  if (email !== undefined) {
+    updates.push(`email = $${values.length + 1}`)
+    values.push(email)
+  }
+
+  if (photo_url !== undefined) {
+    updates.push(`photo_url = $${values.length + 1}`)
+    values.push(photo_url)
+  }
+
+  if (updates.length === 0) return null
+
+  const query = `
+    UPDATE users 
+    SET ${updates.join(", ")}, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $${values.length + 1}
+    RETURNING *
+  `
+  values.push(id)
+
+  const result = await sql.query(query, values)
+  return result.rows.length > 0 ? result.rows[0] : null
+}
+
 export async function getAllUsers() {
   return await sql`SELECT * FROM users ORDER BY created_at DESC`
 }
 
 // Wallet functions
+export async function createWallet(userId: number, initialBalance = 0) {
+  const result = await sql`
+    INSERT INTO wallets (user_id, balance)
+    VALUES (${userId}, ${initialBalance})
+    RETURNING *
+  `
+  return result[0]
+}
+
 export async function createWalletForUser(userId: number) {
   const result = await sql`
     INSERT INTO wallets (user_id, balance)
@@ -81,6 +131,45 @@ export async function deductFromWalletBalance(userId: number, amount: number) {
   if (newBalance < 0) return null
 
   return await updateWalletBalance(userId, newBalance)
+}
+
+// Transaction functions
+export async function createTransaction(transactionData: {
+  user_id: number
+  type: string
+  amount: number
+  description: string
+  reference_id: string
+  balance_after: number
+}) {
+  const { user_id, type, amount, description, reference_id, balance_after } = transactionData
+  const result = await sql`
+    INSERT INTO transactions (
+      user_id, type, amount, description, reference_id, balance_after
+    )
+    VALUES (${user_id}, ${type}, ${amount}, ${description}, ${reference_id}, ${balance_after})
+    RETURNING *
+  `
+  return result[0]
+}
+
+export async function recordTransaction(transactionData: {
+  user_id: number
+  type: string
+  amount: number
+  description: string
+  reference_id: string
+  balance_after: number
+}) {
+  return await createTransaction(transactionData)
+}
+
+export async function getUserTransactions(userId: number) {
+  return await sql`
+    SELECT * FROM transactions
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+  `
 }
 
 // Deposit functions
@@ -176,34 +265,6 @@ export async function approveDeposit(depositId: number, adminNotes?: string) {
   return updatedDeposit
 }
 
-// Transaction functions
-export async function recordTransaction(transactionData: {
-  user_id: number
-  type: string
-  amount: number
-  description: string
-  reference_id: string
-  balance_after: number
-}) {
-  const { user_id, type, amount, description, reference_id, balance_after } = transactionData
-  const result = await sql`
-    INSERT INTO transactions (
-      user_id, type, amount, description, reference_id, balance_after
-    )
-    VALUES (${user_id}, ${type}, ${amount}, ${description}, ${reference_id}, ${balance_after})
-    RETURNING *
-  `
-  return result[0]
-}
-
-export async function getUserTransactions(userId: number) {
-  return await sql`
-    SELECT * FROM transactions
-    WHERE user_id = ${userId}
-    ORDER BY created_at DESC
-  `
-}
-
 // Order functions
 export async function createOrder(orderData: {
   user_id?: number
@@ -287,6 +348,11 @@ export async function updateOrderStatus(orderId: string, status: string) {
 }
 
 // Service functions
+export async function getServiceById(id: number) {
+  const result = await sql`SELECT * FROM services WHERE id = ${id} LIMIT 1`
+  return result.length > 0 ? result[0] : null
+}
+
 export async function getAllServices() {
   return await sql`SELECT * FROM services WHERE active = true ORDER BY platform, name`
 }
@@ -360,6 +426,11 @@ export async function deleteService(id: number) {
 }
 
 // Testimonial functions
+export async function getTestimonialById(id: number) {
+  const result = await sql`SELECT * FROM testimonials WHERE id = ${id} LIMIT 1`
+  return result.length > 0 ? result[0] : null
+}
+
 export async function createTestimonial(testimonialData: {
   user_id?: number
   name: string
@@ -417,6 +488,11 @@ export async function getAllSettings() {
 }
 
 // Admin functions
+export async function getAdminByUsername(username: string) {
+  const result = await sql`SELECT * FROM admins WHERE username = ${username} LIMIT 1`
+  return result.length > 0 ? result[0] : null
+}
+
 export async function createAdmin(username: string, password: string) {
   const passwordHash = await bcrypt.hash(password, 10)
   const result = await sql`
