@@ -5,6 +5,7 @@ export interface User {
   name: string
   photo_url?: string
   created_at: string
+  updated_at?: string
 }
 
 export interface Wallet {
@@ -58,6 +59,7 @@ export interface Order {
   screenshot?: string
   wallet_payment?: boolean
   created_at: string
+  updated_at?: string
 }
 
 export interface Testimonial {
@@ -70,6 +72,7 @@ export interface Testimonial {
   approved: boolean
   avatar?: string | null
   created_at: string
+  updated_at?: string
 }
 
 export interface Service {
@@ -79,6 +82,7 @@ export interface Service {
   price: number
   active?: boolean
   created_at?: string
+  updated_at?: string
 }
 
 export interface Admin {
@@ -86,6 +90,7 @@ export interface Admin {
   username: string
   password_hash: string
   created_at: string
+  updated_at?: string
 }
 
 export interface Setting {
@@ -93,4 +98,15 @@ export interface Setting {
   key: string
   value: string
   updated_at: string
+}
+
+export interface Session {
+  user?: {
+    id?: string | number
+    uid?: string
+    name?: string
+    email?: string
+    image?: string
+  }
+  expires: string
 }
