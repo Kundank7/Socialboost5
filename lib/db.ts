@@ -7,37 +7,87 @@ import bcrypt from "bcryptjs"
 const sql = neon(process.env.DATABASE_URL!)
 const db = drizzle(sql)
 
+// Helper function to check if a table exists
+async function tableExists(tableName: string): Promise<boolean> {
+  try {
+    const result = await sql`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public'
+        AND table_name = ${tableName}
+      )
+    `
+    return result[0].exists
+  } catch (error) {
+    console.error(`Error checking if table ${tableName} exists:`, error)
+    return false
+  }
+}
+
 // User functions
 export async function getUserById(id: number) {
-  const result = await sql`SELECT * FROM users WHERE id = ${id} LIMIT 1`
-  return result.length > 0 ? result[0] : null
+  try {
+    if (!(await tableExists("users"))) {
+      throw new Error("Users table does not exist. Please initialize the database.")
+    }
+    const result = await sql`SELECT * FROM users WHERE id = ${id} LIMIT 1`
+    return result.length > 0 ? result[0] : null
+  } catch (error) {
+    console.error("Error in getUserById:", error)
+    throw error
+  }
 }
 
 export async function getUserByEmail(email: string) {
-  const result = await sql`SELECT * FROM users WHERE email = ${email} LIMIT 1`
-  return result.length > 0 ? result[0] : null
+  try {
+    if (!(await tableExists("users"))) {
+      throw new Error("Users table does not exist. Please initialize the database.")
+    }
+    const result = await sql`SELECT * FROM users WHERE email = ${email} LIMIT 1`
+    return result.length > 0 ? result[0] : null
+  } catch (error) {
+    console.error("Error in getUserByEmail:", error)
+    throw error
+  }
 }
 
 export async function getUserByUid(uid: string) {
-  const result = await sql`SELECT * FROM users WHERE uid = ${uid} LIMIT 1`
-  return result.length > 0 ? result[0] : null
+  try {
+    if (!(await tableExists("users"))) {
+      throw new Error("Users table does not exist. Please initialize the database.")
+    }
+    const result = await sql`SELECT * FROM users WHERE uid = ${uid} LIMIT 1`
+    return result.length > 0 ? result[0] : null
+  } catch (error) {
+    console.error("Error in getUserByUid:", error)
+    throw error
+  }
 }
 
 export async function createUser(userData: { uid: string; email: string; name: string; photo_url?: string }) {
-  const { uid, email, name, photo_url } = userData
-  const result = await sql`
-    INSERT INTO users (uid, email, name, photo_url)
-    VALUES (${uid}, ${email}, ${name}, ${photo_url || null})
-    ON CONFLICT (uid) DO UPDATE
-    SET email = ${email}, name = ${name}, photo_url = ${photo_url || null}
-    RETURNING *
-  `
+  try {
+    if (!(await tableExists("users"))) {
+      throw new Error("Users table does not exist. Please initialize the database.")
+    }
 
-  // Create wallet for new user
-  const user = result[0]
-  await createWalletForUser(user.id)
+    const { uid, email, name, photo_url } = userData
+    const result = await sql`
+      INSERT INTO users (uid, email, name, photo_url)
+      VALUES (${uid}, ${email}, ${name}, ${photo_url || null})
+      ON CONFLICT (uid) DO UPDATE
+      SET email = ${email}, name = ${name}, photo_url = ${photo_url || null}
+      RETURNING *
+    `
 
-  return user
+    // Create wallet for new user
+    const user = result[0]
+    await createWalletForUser(user.id)
+
+    return user
+  } catch (error) {
+    console.error("Error in createUser:", error)
+    throw error
+  }
 }
 
 export async function updateUser(id: number, userData: { name?: string; email?: string; photo_url?: string }) {
@@ -77,7 +127,15 @@ export async function updateUser(id: number, userData: { name?: string; email?: 
 }
 
 export async function getAllUsers() {
-  return await sql`SELECT * FROM users ORDER BY created_at DESC`
+  try {
+    if (!(await tableExists("users"))) {
+      throw new Error("Users table does not exist. Please initialize the database.")
+    }
+    return await sql`SELECT * FROM users ORDER BY created_at DESC`
+  } catch (error) {
+    console.error("Error in getAllUsers:", error)
+    throw error
+  }
 }
 
 // Wallet functions
@@ -91,18 +149,34 @@ export async function createWallet(userId: number, initialBalance = 0) {
 }
 
 export async function createWalletForUser(userId: number) {
-  const result = await sql`
-    INSERT INTO wallets (user_id, balance)
-    VALUES (${userId}, 0)
-    ON CONFLICT (user_id) DO NOTHING
-    RETURNING *
-  `
-  return result.length > 0 ? result[0] : null
+  try {
+    if (!(await tableExists("wallets"))) {
+      throw new Error("Wallets table does not exist. Please initialize the database.")
+    }
+    const result = await sql`
+      INSERT INTO wallets (user_id, balance)
+      VALUES (${userId}, 0)
+      ON CONFLICT (user_id) DO NOTHING
+      RETURNING *
+    `
+    return result.length > 0 ? result[0] : null
+  } catch (error) {
+    console.error("Error in createWalletForUser:", error)
+    throw error
+  }
 }
 
 export async function getUserWallet(userId: number) {
-  const result = await sql`SELECT * FROM wallets WHERE user_id = ${userId} LIMIT 1`
-  return result.length > 0 ? result[0] : null
+  try {
+    if (!(await tableExists("wallets"))) {
+      throw new Error("Wallets table does not exist. Please initialize the database.")
+    }
+    const result = await sql`SELECT * FROM wallets WHERE user_id = ${userId} LIMIT 1`
+    return result.length > 0 ? result[0] : null
+  } catch (error) {
+    console.error("Error in getUserWallet:", error)
+    throw error
+  }
 }
 
 export async function updateWalletBalance(userId: number, newBalance: number) {
