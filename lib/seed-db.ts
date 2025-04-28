@@ -7,6 +7,12 @@ export async function seedDatabase() {
   const sql = neon(process.env.DATABASE_URL!)
 
   try {
+    // Check if tables exist
+    const tablesExist = await checkTablesExist(sql)
+    if (!tablesExist) {
+      return { success: false, error: "Database tables don't exist. Please initialize the database first." }
+    }
+
     // Create admin user
     const adminPassword = await bcrypt.hash("admin123", 10)
     await sql`
@@ -15,6 +21,7 @@ export async function seedDatabase() {
       ON CONFLICT (username) DO UPDATE
       SET password_hash = ${adminPassword}
     `
+    console.log("Seeded admin user")
 
     // Create default settings
     const settings = [
@@ -33,6 +40,7 @@ export async function seedDatabase() {
         SET value = ${setting.value}
       `
     }
+    console.log("Seeded settings")
 
     // Create sample services
     const services = [
@@ -58,10 +66,32 @@ export async function seedDatabase() {
         SET price = ${service.price}, active = true
       `
     }
+    console.log("Seeded services")
 
     return { success: true, message: "Database seeded successfully" }
   } catch (error) {
     console.error("Error seeding database:", error)
-    return { success: false, error: "Failed to seed database" }
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to seed database",
+    }
+  }
+}
+
+// Helper function to check if tables exist
+async function checkTablesExist(sql: any) {
+  try {
+    // Check if users table exists as a proxy for all tables
+    const result = await sql`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public'
+        AND table_name = 'users'
+      )
+    `
+    return result[0].exists
+  } catch (error) {
+    console.error("Error checking if tables exist:", error)
+    return false
   }
 }
