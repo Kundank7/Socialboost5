@@ -80,6 +80,9 @@ export default function Navbar() {
             <Link href="/select" className="text-sm font-medium transition-colors hover:text-primary">
               Services
             </Link>
+            <Link href="/setup" className="text-sm font-medium transition-colors hover:text-primary">
+              Setup
+            </Link>
             {!session && (
               <Link href="#testimonials" className="text-sm font-medium transition-colors hover:text-primary">
                 Testimonials
