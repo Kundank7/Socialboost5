@@ -23,6 +23,15 @@ export const authOptions = {
           return true
         } catch (error) {
           console.error("Error saving user to database:", error)
+          // Check if this is a "relation does not exist" error
+          if (
+            error instanceof Error &&
+            error.message.includes("relation") &&
+            error.message.includes("does not exist")
+          ) {
+            // Redirect to setup page
+            return "/setup?error=database_not_initialized"
+          }
           return true // Still allow sign in even if DB save fails
         }
       }
@@ -39,6 +48,8 @@ export const authOptions = {
           }
         } catch (error) {
           console.error("Error fetching user data for session:", error)
+          // We don't need to handle this error specifically, as it won't break the app
+          // The session will just not have the additional user data
         }
       }
       return session
