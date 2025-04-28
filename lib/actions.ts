@@ -2,6 +2,9 @@
 
 import { neon } from "@neondatabase/serverless"
 import * as db from "@/lib/db"
+import { cookies } from "next/headers"
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/app/api/auth/[...nextauth]/route"
 
 // Re-export all functions from db
 export const {
@@ -50,6 +53,8 @@ export const {
   createWallet,
   getUserWallet,
   updateWalletBalance,
+  addToWalletBalance,
+  deductFromWalletBalance,
 
   // Deposit functions
   createDeposit,
@@ -61,25 +66,23 @@ export const {
 
   // Transaction functions
   createTransaction,
+  recordTransaction,
   getUserTransactions,
 } = db
 
-// Custom functions that extend db functionality
-// User actions
-export async function getCurrentUser(uid: string) {
-  try {
-    const user = await getUserByUid(uid)
-    return { success: true, user }
-  } catch (error) {
-    console.error("Error fetching user:", error)
-    return { success: false, error: "Failed to fetch user" }
-  }
+// Get current user session
+export async function getCurrentUser() {
+  const session = await getServerSession(authOptions)
+  return session?.user
 }
 
 // Order actions
 export async function getOrder(orderId: string) {
   try {
     const order = await getOrderById(orderId)
+    if (!order) {
+      return { success: false, error: "Order not found" }
+    }
     return { success: true, order }
   } catch (error) {
     console.error("Error fetching order:", error)
@@ -99,11 +102,11 @@ export async function getUserOrders(userId: number) {
 
 export async function getEmailOrders(email: string) {
   try {
-    const orders = await getOrdersByEmail(email)
+    const orders = await db.getOrdersByEmail(email)
     return { success: true, orders }
   } catch (error) {
-    console.error("Error fetching email orders:", error)
-    return { success: false, error: "Failed to fetch orders" }
+    console.error("Error getting orders by email:", error)
+    return { success: false, error: "Failed to get orders" }
   }
 }
 
@@ -203,23 +206,47 @@ export async function submitTestimonial(testimonialData: {
 export async function getUserWalletData(userId: number) {
   try {
     const wallet = await getUserWallet(userId)
+    if (!wallet) {
+      return { success: false, error: "Wallet not found" }
+    }
     return { success: true, wallet }
   } catch (error) {
-    console.error("Error fetching wallet:", error)
-    return { success: false, error: "Failed to fetch wallet" }
+    console.error("Error getting user wallet:", error)
+    return { success: false, error: "Failed to get wallet" }
   }
 }
 
 export async function createUserDeposit(depositData: {
-  user_id: number
-  amount_usd: number
-  amount_inr?: number
-  payment_method: string
+  userId: number
+  amountUSD: number
+  paymentMethod: string
   screenshot?: string
-  transaction_id?: string
+  transactionId?: string
 }) {
   try {
-    const deposit = await createDeposit(depositData)
+    const { userId, amountUSD, paymentMethod, screenshot, transactionId } = depositData
+
+    // Validate minimum deposit
+    if (amountUSD < 1) {
+      return { success: false, error: "Minimum deposit amount is $1" }
+    }
+
+    // Convert USD to INR if using QR/UPI
+    let amountINR = null
+    if (paymentMethod === "QR/UPI") {
+      const exchangeRate = await getUSDToINRRate()
+      amountINR = Math.ceil(amountUSD * exchangeRate) // Round up to nearest integer
+    }
+
+    const deposit = await createDeposit({
+      user_id: userId,
+      amount_usd: amountUSD,
+      amount_inr: amountINR,
+      payment_method: paymentMethod,
+      screenshot,
+      transaction_id: transactionId,
+    })
+
     return { success: true, deposit }
   } catch (error) {
     console.error("Error creating deposit:", error)
@@ -232,8 +259,8 @@ export async function getUserDepositHistory(userId: number) {
     const deposits = await getUserDeposits(userId)
     return { success: true, deposits }
   } catch (error) {
-    console.error("Error fetching deposits:", error)
-    return { success: false, error: "Failed to fetch deposits" }
+    console.error("Error getting user deposits:", error)
+    return { success: false, error: "Failed to get deposits" }
   }
 }
 
@@ -242,21 +269,48 @@ export async function getUserTransactionHistory(userId: number) {
     const transactions = await getUserTransactions(userId)
     return { success: true, transactions }
   } catch (error) {
-    console.error("Error fetching transactions:", error)
-    return { success: false, error: "Failed to fetch transactions" }
+    console.error("Error getting user transactions:", error)
+    return { success: false, error: "Failed to get transactions" }
   }
 }
 
 // Admin actions
-export async function adminLogin(credentials: { username: string; password: string }) {
+export async function adminLogin({
+  username,
+  password,
+}: { username: string; password: string }): Promise<{ success: boolean; error?: string }> {
   try {
-    const { username, password } = credentials
     const isValid = await verifyAdmin(username, password)
-    return { success: isValid }
+
+    if (isValid) {
+      // Set a cookie to maintain session
+      cookies().set("admin_session", "true", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60 * 24, // 1 day
+        path: "/",
+      })
+
+      return { success: true }
+    }
+
+    return { success: false, error: "Invalid credentials" }
   } catch (error) {
-    console.error("Error during admin login:", error)
-    return { success: false, error: "Failed to verify admin credentials" }
+    console.error("Error during login:", error)
+    return { success: false, error: "Login failed" }
   }
+}
+
+// Admin logout
+export async function adminLogout(): Promise<{ success: boolean }> {
+  cookies().delete("admin_session")
+  return { success: true }
+}
+
+// Check admin session
+export async function checkAdminSession(): Promise<{ success: boolean }> {
+  const session = cookies().get("admin_session")
+  return { success: !!session }
 }
 
 export async function adminGetAllOrders() {
@@ -382,23 +436,58 @@ export async function adminDeleteService(id: number) {
   }
 }
 
-// Admin session management
-export async function checkAdminSession() {
-  return { success: true }
+export async function approveTestimonial(testimonialId: string | number) {
+  try {
+    const id = typeof testimonialId === "string" ? Number.parseInt(testimonialId, 10) : testimonialId
+    const result = await updateTestimonialApproval(id, true)
+    if (!result) {
+      return { success: false, error: "Testimonial not found" }
+    }
+    return { success: true }
+  } catch (error) {
+    console.error("Error approving testimonial:", error)
+    return { success: false, error: "Failed to approve testimonial" }
+  }
 }
 
-export async function adminLogout() {
-  return { success: true }
+export async function rejectTestimonial(testimonialId: string | number) {
+  try {
+    const id = typeof testimonialId === "string" ? Number.parseInt(testimonialId, 10) : testimonialId
+    const result = await updateTestimonialApproval(id, false)
+    if (!result) {
+      return { success: false, error: "Testimonial not found" }
+    }
+    return { success: true }
+  } catch (error) {
+    console.error("Error rejecting testimonial:", error)
+    return { success: false, error: "Failed to reject testimonial" }
+  }
 }
+
+export async function rejectDeposit(depositId: number, adminNotes?: string) {
+  try {
+    const result = await updateDepositStatus(depositId, "Rejected", adminNotes)
+    if (!result) {
+      return { success: false, error: "Deposit not found" }
+    }
+    return { success: true, deposit: result }
+  } catch (error) {
+    console.error("Error rejecting deposit:", error)
+    return { success: false, error: "Failed to reject deposit" }
+  }
+}
+
+// Admin session management
+// export async function checkAdminSession() {
+//   return { success: true }
+// }
+
+// export async function adminLogout() {
+//   return { success: true }
+// }
 
 export async function addService(serviceData: { platform: string; name: string; price: number }) {
-  try {
-    const service = await createService(serviceData)
-    return { success: true, service }
-  } catch (error) {
-    console.error("Error creating service:", error)
-    return { success: false, error: "Failed to create service" }
-  }
+  return await createService(serviceData)
 }
 
 export async function approveTestimonialFunc(id: number) {
@@ -442,35 +531,42 @@ export async function rejectDepositFunc(depositId: number, adminNotes?: string) 
 }
 
 export async function getUSDToINRRate(): Promise<number> {
-  return 83.5 // Fixed exchange rate for now
+  // In a real app, you would fetch this from an API
+  // For now, we'll use a fixed rate
+  return 83.5 // 1 USD = 83.5 INR (example rate)
 }
 
-export async function approveTestimonial(testimonialId: string) {
-  try {
-    const testimonial = await updateTestimonialApproval(Number(testimonialId), true)
-    return { success: true, testimonial: null }
-  } catch (error) {
-    console.error("Error approving testimonial:", error)
-    return { success: false, error: "Failed to approve testimonial" }
-  }
-}
+// Add these functions to ensure compatibility with existing code
+// export async function addService(serviceData: { platform: string; name: string; price: number }) {
+//   return await createService(serviceData)
+// }
 
-export async function rejectTestimonial(testimonialId: string) {
-  try {
-    const testimonial = await updateTestimonialApproval(Number(testimonialId), false)
-    return { success: true, testimonial: null }
-  } catch (error) {
-    console.error("Error rejecting testimonial:", error)
-    return { success: false, error: "Failed to reject testimonial" }
-  }
-}
+// export async function approveTestimonial(testimonialId: string) {
+//   try {
+//     const testimonial = await updateTestimonialApproval(Number(testimonialId), true)
+//     return { success: true, testimonial: null }
+//   } catch (error) {
+//     console.error("Error approving testimonial:", error)
+//     return { success: false, error: "Failed to approve testimonial" }
+//   }
+// }
 
-export async function rejectDeposit(depositId: number, adminNotes?: string) {
-  try {
-    const deposit = await updateDepositStatus(depositId, "Rejected", adminNotes)
-    return { success: true, deposit: null }
-  } catch (error) {
-    console.error("Error rejecting deposit:", error)
-    return { success: false, error: "Failed to reject deposit" }
-  }
-}
+// export async function rejectTestimonial(testimonialId: string) {
+//   try {
+//     const testimonial = await updateTestimonialApproval(Number(testimonialId), false)
+//     return { success: true, testimonial: null }
+//   } catch (error) {
+//     console.error("Error rejecting testimonial:", error)
+//     return { success: false, error: "Failed to reject testimonial" }
+//   }
+// }
+
+// export async function rejectDeposit(depositId: number, adminNotes?: string) {
+//   try {
+//     const deposit = await updateDepositStatus(depositId, "Rejected", adminNotes)
+//     return { success: true, deposit: null }
+//   } catch (error) {
+//     console.error("Error rejecting deposit:", error)
+//     return { success: false, error: "Failed to reject deposit" }
+//   }
+// }
