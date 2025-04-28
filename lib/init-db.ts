@@ -6,6 +6,12 @@ export async function initializeDatabase() {
   const sql = neon(process.env.DATABASE_URL!)
 
   try {
+    // Check if tables already exist
+    const tablesExist = await checkTablesExist(sql)
+    if (tablesExist) {
+      return { success: true, message: "Database tables already exist" }
+    }
+
     // Create users table
     await sql`
       CREATE TABLE IF NOT EXISTS users (
@@ -18,6 +24,7 @@ export async function initializeDatabase() {
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `
+    console.log("Created users table")
 
     // Create services table
     await sql`
@@ -32,6 +39,44 @@ export async function initializeDatabase() {
         UNIQUE(platform, name)
       )
     `
+    console.log("Created services table")
+
+    // Create admins table (before orders, as it has no dependencies)
+    await sql`
+      CREATE TABLE IF NOT EXISTS admins (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(100) UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `
+    console.log("Created admins table")
+
+    // Create settings table (before orders, as it has no dependencies)
+    await sql`
+      CREATE TABLE IF NOT EXISTS settings (
+        id SERIAL PRIMARY KEY,
+        key VARCHAR(100) UNIQUE NOT NULL,
+        value TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `
+    console.log("Created settings table")
+
+    // Create wallet table
+    await sql`
+      CREATE TABLE IF NOT EXISTS wallets (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        balance DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id)
+      )
+    `
+    console.log("Created wallets table")
 
     // Create orders table
     await sql`
@@ -54,6 +99,7 @@ export async function initializeDatabase() {
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `
+    console.log("Created orders table")
 
     // Create testimonials table
     await sql`
@@ -70,40 +116,7 @@ export async function initializeDatabase() {
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `
-
-    // Create settings table
-    await sql`
-      CREATE TABLE IF NOT EXISTS settings (
-        id SERIAL PRIMARY KEY,
-        key VARCHAR(100) UNIQUE NOT NULL,
-        value TEXT NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      )
-    `
-
-    // Create admins table
-    await sql`
-      CREATE TABLE IF NOT EXISTS admins (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(100) UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      )
-    `
-
-    // Create wallet table
-    await sql`
-      CREATE TABLE IF NOT EXISTS wallets (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        balance DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_id)
-      )
-    `
+    console.log("Created testimonials table")
 
     // Create deposits table
     await sql`
@@ -121,6 +134,7 @@ export async function initializeDatabase() {
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `
+    console.log("Created deposits table")
 
     // Create transactions table for history
     await sql`
@@ -135,10 +149,32 @@ export async function initializeDatabase() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `
+    console.log("Created transactions table")
 
     return { success: true, message: "Database schema initialized successfully" }
   } catch (error) {
     console.error("Error initializing database schema:", error)
-    return { success: false, error: "Failed to initialize database schema" }
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to initialize database schema",
+    }
+  }
+}
+
+// Helper function to check if tables already exist
+async function checkTablesExist(sql: any) {
+  try {
+    // Check if users table exists as a proxy for all tables
+    const result = await sql`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public'
+        AND table_name = 'users'
+      )
+    `
+    return result[0].exists
+  } catch (error) {
+    console.error("Error checking if tables exist:", error)
+    return false
   }
 }
